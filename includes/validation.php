@@ -22,7 +22,7 @@ function valid_username(string $username): bool
 function valid_password(string $password): bool
 {
     // Simplified requirement: Minimum 6 characters
-    return strlen($password) >= 6;
+    return mb_strlen($password) >= 6;
 }
 
 function valid_phone(string $phone): bool

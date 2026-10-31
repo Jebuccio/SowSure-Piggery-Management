@@ -10,6 +10,8 @@ function start_secure_session(array $app): void
     $secure = (!empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off')
         || (($_SERVER['HTTP_X_FORWARDED_PROTO'] ?? '') === 'https');
 
+    $cookieName = $app['session_name'] ?? 'SOWSURE_SESSION';
+
     ini_set('session.use_strict_mode', '1');
     ini_set('session.use_only_cookies', '1');
     ini_set('session.cookie_httponly', '1');
@@ -17,7 +19,7 @@ function start_secure_session(array $app): void
     ini_set('session.cookie_secure', $secure ? '1' : '0');
     ini_set('session.gc_maxlifetime', (string) $app['session_absolute_seconds']);
 
-    session_name('SOWSURE_SESSION');
+    session_name($cookieName);
     session_set_cookie_params([
         'lifetime' => 0,
         'path' => '/',
@@ -32,8 +34,8 @@ function start_secure_session(array $app): void
     $_SESSION['last_activity'] ??= $now;
 
     if (
-        $now - (int) $_SESSION['last_activity'] > $app['session_idle_seconds']
-        || $now - (int) $_SESSION['started_at'] > $app['session_absolute_seconds']
+        ($now - (int) $_SESSION['last_activity']) > $app['session_idle_seconds']
+        || ($now - (int) $_SESSION['started_at']) > $app['session_absolute_seconds']
     ) {
         clear_session();
         session_start();

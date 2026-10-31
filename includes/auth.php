@@ -21,8 +21,13 @@ function store_auth_session(array $response): void
     if (empty($response['access_token']) || empty($response['user']['id'])) {
         throw new RuntimeException('Authentication response was incomplete.');
     }
-    session_regenerate_id(true);
-    $_SESSION['started_at'] = time();
+    
+    // Only regenerate session ID if it's a fresh login/transition to avoid dropping data
+    if (session_status() === PHP_SESSION_ACTIVE && !isset($_SESSION['auth'])) {
+        session_regenerate_id(true);
+    }
+    
+    $_SESSION['started_at'] ??= time();
     $_SESSION['last_activity'] = time();
     $_SESSION['auth'] = [
         'user_id' => (string) $response['user']['id'],
@@ -65,21 +70,42 @@ function current_profile(): array
     if (!is_authenticated()) {
         return [];
     }
-    if (isset($_SESSION['profile']) && is_array($_SESSION['profile'])) {
+    if (isset($_SESSION['profile']) && is_array($_SESSION['profile']) && !empty($_SESSION['profile'])) {
         return $_SESSION['profile'];
     }
+    
     try {
+        $userId = auth_user_id();
         $rows = $supabase->select('profiles', [
             'select' => 'id,full_name,farm_name,username,preferred_language,created_at',
-            'id' => 'eq.' . auth_user_id(),
+            'id' => 'eq.' . $userId,
             'limit' => '1',
         ], access_token());
-        $_SESSION['profile'] = $rows[0] ?? [];
+        
+        if (!empty($rows[0])) {
+            $_SESSION['profile'] = $rows[0];
+        } else {
+            // Auto-provision a profile row for social login users if it doesn't exist yet
+            $email = $_SESSION['auth']['email'] ?? '';
+            $username = $email ? explode('@', $email)[0] : 'farmer_' . substr($userId, 0, 6);
+            
+            $newProfile = [
+                'id' => $userId,
+                'full_name' => 'SowSure Farmer',
+                'farm_name' => 'My Piggery Farm',
+                'username' => $username,
+                'preferred_language' => 'en',
+            ];
+            
+            $supabase->insert('profiles', $newProfile, access_token());
+            $_SESSION['profile'] = $newProfile;
+        }
     } catch (Throwable $exception) {
-        error_log('Profile fetch failed: ' . $exception->getMessage());
+        error_log('Profile fetch/creation failed: ' . $exception->getMessage());
         $_SESSION['profile'] = [];
     }
-    return $_SESSION['profile'];
+    
+    return $_SESSION['profile'] ?? [];
 }
 
 function login_is_rate_limited(): bool

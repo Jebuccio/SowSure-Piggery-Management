@@ -169,7 +169,7 @@ require dirname(__DIR__) . '/includes/header.php';
 <script>
 function redirectToProvider(provider) {
     const supabaseUrl = 'https://eefuplooeyhwomvwydew.supabase.co';
-    const redirectTo = window.location.origin + '/dashboard.php';
+    const redirectTo = window.location.origin + '/login.php';
     window.location.href = `${supabaseUrl}/auth/v1/authorize?provider=${provider}&redirect_to=${encodeURIComponent(redirectTo)}`;
 }
 
