@@ -170,7 +170,7 @@ require dirname(__DIR__) . '/includes/header.php';
 function redirectToProvider(provider) {
     const supabaseUrl = 'https://eefuplooeyhwomvwydew.supabase.co';
     const redirectTo = window.location.origin + '/login.php';
-    window.location.href = `${supabaseUrl}/auth/v1/authorize?provider=${provider}&redirect_to=${encodeURIComponent(redirectTo)}`;
+    window.location.href = `${supabaseUrl}/auth/v1/authorize?provider=${provider}&redirect_to=${encodeURIComponent(redirectTo)}&flow_type=token`;
 }
 
 function autoGenerateUsername() {
