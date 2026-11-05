@@ -68,21 +68,19 @@ require dirname(__DIR__) . '/includes/header.php';
 
         <?php if (isset($errors['form'])): ?><div class="form-alert" role="alert"><?= e($errors['form']) ?></div><?php endif; ?>
 
-        <div class="social-auth-buttons" style="display: flex; gap: 10px; margin-bottom: 20px;">
-            <button type="button" onclick="redirectToProvider('google')" class="button" style="flex: 1; background: #fff; color: #333; border: 1px solid #ccc; display: flex; align-items: center; justify-content: center; gap: 8px; cursor: pointer;">
+        <div class="social-auth-buttons">
+            <button type="button" id="google-login-btn" class="social-btn google-btn">
                 <svg width="18" height="18" viewBox="0 0 24 24"><path fill="#4285F4" d="M23.745 12.27c0-.7-.06-1.4-.19-2.07H12v4.51h6.6c-.29 1.52-1.14 2.82-2.4 3.68v3.05h3.88c2.27-2.09 3.66-5.17 3.66-9.17z"/><path fill="#34A853" d="M12 24c3.24 0 5.95-1.08 7.93-2.91l-3.88-3.05c-1.08.72-2.45 1.16-4.05 1.16-3.13 0-5.78-2.11-6.73-4.96H1.19v3.15C3.17 21.32 7.22 24 12 24z"/><path fill="#FBBC05" d="M5.27 14.24c-.25-.72-.38-1.49-.38-2.24s.13-1.52.38-2.24V6.61H1.19C.43 8.14 0 9.88 0 12s.43 3.86 1.19 5.39l4.08-3.15z"/><path fill="#EA4335" d="M12 4.75c1.77 0 3.35.61 4.6 1.8l3.42-3.42C17.95 1.19 15.24 0 12 0 7.22 0 3.17 2.68 1.19 6.61l4.08 3.15c.95-2.85 3.6-4.96 6.73-4.96z"/></svg>
                 Google
             </button>
-            <button type="button" onclick="redirectToProvider('facebook')" class="button" style="flex: 1; background: #1877f2; color: #fff; border: none; display: flex; align-items: center; justify-content: center; gap: 8px; cursor: pointer;">
+            <button type="button" id="facebook-login-btn" class="social-btn facebook-btn">
                 <svg width="18" height="18" fill="currentColor" viewBox="0 0 24 24"><path d="M24 12.073c0-6.627-5.373-12-12-12s-12 5.373-12 12c0 5.99 4.388 10.954 10.125 11.854v-8.385H7.078v-3.47h3.047V9.43c0-3.007 1.792-4.669 4.533-4.669 1.312 0 2.686.235 2.686.235v2.953H15.83c-1.491 0-1.956.925-1.956 1.874v2.25h3.328l-.532 3.47h-2.796v8.385C19.612 23.027 24 18.062 24 12.073z"/></svg>
                 Facebook
             </button>
         </div>
 
-        <div style="display: flex; align-items: center; text-align: center; margin: 15px 0; color: #666; font-size: 0.85rem;">
-            <div style="flex: 1; border-bottom: 1px solid #ddd;"></div>
-            <span style="padding: 0 10px;">or sign in with password</span>
-            <div style="flex: 1; border-bottom: 1px solid #ddd;"></div>
+        <div class="auth-divider">
+            <span>or sign in with password</span>
         </div>
 
         <form method="post" class="stack-form" novalidate>
@@ -91,10 +89,10 @@ require dirname(__DIR__) . '/includes/header.php';
                 <input type="text" name="identifier" value="<?= e($identifier) ?>" maxlength="254" autocomplete="username" required>
                 <?php if (isset($errors['identifier'])): ?><small class="field-error"><?= e($errors['identifier']) ?></small><?php endif; ?>
             </label>
-            <label style="position: relative;">Password
-                <div style="position: relative; display: flex; align-items: center;">
-                    <input type="password" name="password" id="login_password_input" autocomplete="current-password" required style="width: 100%; padding-right: 40px;">
-                    <button type="button" onclick="togglePasswordVisibility('login_password_input', 'login_eye_icon')" style="position: absolute; right: 10px; background: none; border: none; cursor: pointer; color: #666;" title="Show/Hide Password">
+            <label class="password-label">Password
+                <div class="password-wrapper">
+                    <input type="password" name="password" id="login_password_input" autocomplete="current-password" required>
+                    <button type="button" id="toggle_password_btn" class="password-toggle-btn" title="Show/Hide Password">
                         <svg id="login_eye_icon" xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"></path><circle cx="12" cy="12" r="3"></circle></svg>
                     </button>
                 </div>
@@ -106,27 +104,60 @@ require dirname(__DIR__) . '/includes/header.php';
     </div>
 </section>
 
+<style>
+/* Dedicated styles bypassing global .button overrides and CSP inline style restrictions */
+.social-auth-buttons { display: flex; gap: 10px; margin-bottom: 20px; }
+.social-btn { flex: 1; display: flex; align-items: center; justify-content: center; gap: 8px; padding: 10px; border-radius: 6px; font-weight: 500; cursor: pointer; font-size: 0.95rem; }
+.google-btn { background: #fff; color: #333; border: 1px solid #ccc; }
+.google-btn:hover { background: #f8f9fa; }
+.facebook-btn { background: #1877f2; color: #fff; border: none; }
+.facebook-btn:hover { background: #166fe5; }
+.auth-divider { display: flex; align-items: center; text-align: center; margin: 15px 0; color: #666; font-size: 0.85rem; }
+.auth-divider::before, .auth-divider::after { content: ''; flex: 1; border-bottom: 1px solid #ddd; }
+.auth-divider span { padding: 0 10px; }
+.password-label { position: relative; }
+.password-wrapper { position: relative; display: flex; align-items: center; }
+.password-wrapper input { width: 100%; padding-right: 40px; }
+.password-toggle-btn { position: absolute; right: 10px; background: none; border: none; cursor: pointer; color: #666; display: flex; align-items: center; }
+</style>
+
 <script>
-function redirectToProvider(provider) {
-    const supabaseUrl = 'https://eefuplooeyhwomvwydew.supabase.co';
-    // Dynamically captures http://localhost:8000/login.php OR https://sowsure-piggery-management.onrender.com/login.php
-    const redirectTo = window.location.origin + window.location.pathname;
-    window.location.href = `${supabaseUrl}/auth/v1/authorize?provider=${provider}&redirect_to=${encodeURIComponent(redirectTo)}&flow_type=token`;
-}
-
-function togglePasswordVisibility(inputId, iconId) {
-    const input = document.getElementById(inputId);
-    const icon = document.getElementById(iconId);
-    if (input.type === "password") {
-        input.type = "text";
-        icon.style.stroke = "#2563eb";
-    } else {
-        input.type = "password";
-        icon.style.stroke = "currentColor";
+document.addEventListener('DOMContentLoaded', () => {
+    // Social Login Handler
+    function redirectToProvider(provider) {
+        const supabaseUrl = 'https://eefuplooeyhwomvwydew.supabase.co';
+        const redirectTo = window.location.origin + window.location.pathname;
+        window.location.href = `${supabaseUrl}/auth/v1/authorize?provider=${provider}&redirect_to=${encodeURIComponent(redirectTo)}&flow_type=token`;
     }
-}
 
-window.addEventListener('DOMContentLoaded', () => {
+    const googleBtn = document.getElementById('google-login-btn');
+    if (googleBtn) {
+        googleBtn.addEventListener('click', () => redirectToProvider('google'));
+    }
+
+    const facebookBtn = document.getElementById('facebook-login-btn');
+    if (facebookBtn) {
+        facebookBtn.addEventListener('click', () => redirectToProvider('facebook'));
+    }
+
+    // Password Visibility Toggle
+    const toggleBtn = document.getElementById('toggle_password_btn');
+    const passwordInput = document.getElementById('login_password_input');
+    const eyeIcon = document.getElementById('login_eye_icon');
+
+    if (toggleBtn && passwordInput && eyeIcon) {
+        toggleBtn.addEventListener('click', () => {
+            if (passwordInput.type === "password") {
+                passwordInput.type = "text";
+                eyeIcon.style.stroke = "#2563eb";
+            } else {
+                passwordInput.type = "password";
+                eyeIcon.style.stroke = "currentColor";
+            }
+        });
+    }
+
+    // OAuth Token Fragment Handler
     const hash = window.location.hash;
     if (hash && hash.includes('access_token')) {
         const params = new URLSearchParams(hash.substring(1));
