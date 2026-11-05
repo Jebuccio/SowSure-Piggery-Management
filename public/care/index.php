@@ -3,84 +3,84 @@ declare(strict_types=1);
 require dirname(__DIR__, 2) . '/includes/bootstrap.php';
 require_auth();
 
-if (method_is('POST') && ($_POST['action'] ?? '') === 'complete') {
-    verify_csrf();
-    $id = clean_text($_POST['id'] ?? '', 36);
-    try {
-        $record = find_owned_record('care_activities', $id);
-        if (!$record) {
-            throw new RuntimeException('Record not found.');
-        }
-        $supabase->update('care_activities', ['id' => 'eq.' . $id, 'owner_id' => 'eq.' . auth_user_id()], [
-            'completed_at' => (new DateTimeImmutable('now', new DateTimeZone('Asia/Manila')))->format(DateTimeInterface::ATOM),
-        ], access_token());
-        flash('success', 'Care activity marked complete.');
-    } catch (Throwable $exception) {
-        error_log('Complete care failed: ' . $exception->getMessage());
-        flash('error', 'We could not complete that activity.');
-    }
-    redirect('/care/index.php');
-}
+$search = clean_text($_GET['search'] ?? '', 100);
+$loadError = null;
+$sows = [];
 
-$view = clean_text($_GET['view'] ?? 'pending', 20);
-if (!in_array($view, ['pending', 'overdue', 'completed', 'all'], true)) {
-    $view = 'pending';
-}
-$today = manila_today();
 try {
-    $activities = $supabase->select('care_activities', [
-        'select' => 'id,sow_id,activity_type,scheduled_date,notes,completed_at,sows(name,tag_number)',
-        'owner_id' => 'eq.' . auth_user_id(),
-        'order' => 'scheduled_date.asc',
-    ], access_token());
+    $userId = auth_user_id();
+    $token = access_token();
+
+    // Query active sows safely
+    $sowsRaw = $supabase->select('sows', [
+        'select' => 'id,name,tag_number,created_at',
+        'owner_id' => 'eq.' . $userId,
+        'order' => 'created_at.desc',
+    ], $token);
+    
+    $sows = is_array($sowsRaw) ? $sowsRaw : [];
+
+    // Filter by search query if typed
+    if ($search !== '') {
+        $searchLower = mb_strtolower($search);
+        $sows = array_values(array_filter($sows, static function (array $sow) use ($searchLower): bool {
+            return str_contains(mb_strtolower($sow['name'] ?? ''), $searchLower) ||
+                   str_contains(mb_strtolower($sow['tag_number'] ?? ''), $searchLower);
+        }));
+    }
+
 } catch (Throwable $exception) {
-    error_log('Care list failed: ' . $exception->getMessage());
-    $activities = [];
-    $loadError = 'We could not load care activities.';
+    error_log('Sow list failed: ' . $exception->getMessage());
+    $sows = [];
+    // TEMPORARY DEBUGGER: This will display the exact technical error on your screen
+    $loadError = 'Database/Query Error: ' . $exception->getMessage();
 }
 
-$filtered = array_values(array_filter($activities, static function (array $activity) use ($view, $today): bool {
-    return match ($view) {
-        'pending' => !$activity['completed_at'] && $activity['scheduled_date'] >= $today,
-        'overdue' => !$activity['completed_at'] && $activity['scheduled_date'] < $today,
-        'completed' => (bool) $activity['completed_at'],
-        default => true,
-    };
-}));
-$overdueCount = count(array_filter($activities, static fn (array $a): bool => !$a['completed_at'] && $a['scheduled_date'] < $today));
-
-$pageTitle = 'Care activities';
+$pageTitle = 'Sow management';
 require dirname(__DIR__, 2) . '/includes/header.php';
 ?>
 <div class="page-heading">
-    <div><span class="eyebrow">Care & reminders</span><h1>Care activities</h1><p>Keep vaccinations, vitamins, deworming, and health checks in view.</p></div>
-    <a class="button" href="<?= e(url('/care/create.php')) ?>">Schedule care</a>
+    <div><span class="eyebrow">Herd records</span><h1>Sow management</h1><p>Know your herd and keep every record current.</p></div>
+    <a class="button" href="<?= e(url('/sows/create.php')) ?>">Add sow</a>
 </div>
-<?php if (isset($loadError)): ?><div class="form-alert"><?= e($loadError) ?></div><?php endif; ?>
-<nav class="tabs" aria-label="Care activity views">
-    <a class="<?= $view === 'pending' ? 'active' : '' ?>" href="?view=pending">Upcoming</a>
-    <a class="<?= $view === 'overdue' ? 'active' : '' ?>" href="?view=overdue">Overdue<?= $overdueCount ? ' (' . $overdueCount . ')' : '' ?></a>
-    <a class="<?= $view === 'completed' ? 'active' : '' ?>" href="?view=completed">Completed</a>
-    <a class="<?= $view === 'all' ? 'active' : '' ?>" href="?view=all">All</a>
-</nav>
+
+<?php if ($loadError): ?>
+    <div class="form-alert" role="alert" style="background: #f8d7da; color: #721c24; padding: 15px; border-radius: 6px; margin-bottom: 20px; font-weight: bold;">
+        <?= e($loadError) ?>
+    </div>
+<?php endif; ?>
+
+<form method="get" class="filter-bar card">
+    <input type="text" name="search" value="<?= e($search) ?>" placeholder="Search by name or tag number" maxlength="100">
+    <button class="button button-secondary" type="submit">Filter</button>
+</form>
+
 <section class="agenda">
-<?php if (!$filtered): ?>
-    <div class="empty-state card"><span class="empty-icon"><?= nav_icon('care') ?></span><h2>Nothing in this view</h2><p><?= $view === 'pending' ? 'Schedule care to start a practical agenda for your herd.' : 'There are no matching care activities.' ?></p><a class="button" href="<?= e(url('/care/create.php')) ?>">Schedule care</a></div>
-<?php else: ?>
-    <?php foreach ($filtered as $activity): $sow = $activity['sows'] ?? []; $overdue = !$activity['completed_at'] && $activity['scheduled_date'] < $today; ?>
-        <article class="agenda-item card <?= $overdue ? 'overdue' : '' ?>">
-            <div class="agenda-date"><strong><?= e((new DateTimeImmutable($activity['scheduled_date']))->format('d')) ?></strong><span><?= e((new DateTimeImmutable($activity['scheduled_date']))->format('M')) ?></span></div>
-            <div class="agenda-content">
-                <div class="agenda-title"><h2><?= e(ucwords(str_replace('_', ' ', $activity['activity_type']))) ?></h2><span class="status <?= $activity['completed_at'] ? 'status-complete' : ($overdue ? 'status-overdue' : 'status-pending') ?>"><?= $activity['completed_at'] ? 'Completed' : ($overdue ? 'Overdue' : 'Scheduled') ?></span></div>
-                <p><a href="<?= e(url('/sows/view.php?id=' . rawurlencode($activity['sow_id']))) ?>"><?= e($sow['name'] ?? 'Sow') ?></a> · Tag <?= e($sow['tag_number'] ?? '—') ?></p>
-                <?php if ($activity['notes']): ?><p class="record-note"><?= e($activity['notes']) ?></p><?php endif; ?>
+<?php if (!$sows && !$loadError): ?>
+    <div class="empty-state card">
+        <h2>No sows found</h2>
+        <p>Register your first active sow to start tracking your herd.</p>
+        <a class="button" href="<?= e(url('/sows/create.php')) ?>">Add sow</a>
+    </div>
+<?php elseif ($sows): ?>
+    <div class="dashboard-list card" style="display: flex; flex-direction: column; gap: 8px; padding: 12px;">
+    <?php foreach ($sows as $sow): ?>
+        <a href="<?= e(url('/sows/view.php?id=' . rawurlencode($sow['id']))) ?>" style="display: flex; align-items: center; justify-content: space-between; padding: 12px 16px; background: var(--card-bg, #ffffff); border: 1px solid var(--border-color, #e2e8f0); border-radius: 8px; text-decoration: none; color: inherit;">
+            <div style="display: flex; align-items: center; gap: 12px;">
+                <span class="date-tile" style="display: flex; flex-direction: column; align-items: center; justify-content: center; width: 40px; height: 40px; background: var(--bg-subtle, #f1f5f9); border-radius: 6px; font-weight: bold; font-size: 14px;">
+                    <strong>S</strong>
+                    <small style="font-size: 9px; font-weight: normal; opacity: 0.8;">Active</small>
+                </span>
+                <span style="display: flex; flex-direction: column; gap: 2px;">
+                    <strong style="font-size: 14px;"><?= e($sow['name']) ?></strong>
+                    <small style="font-size: 12px; color: var(--text-muted, #64748b);">Tag <?= e($sow['tag_number']) ?> · Created <?= e(format_date($sow['created_at'])) ?></small>
+                </span>
             </div>
-            <div class="agenda-actions">
-                <a class="button button-ghost button-small" href="<?= e(url('/care/edit.php?id=' . rawurlencode($activity['id']))) ?>">Edit</a>
-                <?php if (!$activity['completed_at']): ?><form method="post" data-confirm="Mark this care activity as completed?"><?= csrf_field() ?><input type="hidden" name="action" value="complete"><input type="hidden" name="id" value="<?= e($activity['id']) ?>"><button class="button button-small" type="submit">Mark complete</button></form><?php endif; ?>
-            </div>
-        </article>
+            <span class="chevron" style="font-size: 18px; color: var(--text-muted, #94a3b8);">›</span>
+        </a>
     <?php endforeach; ?>
+    </div>
 <?php endif; ?>
 </section>
+
 <?php require dirname(__DIR__, 2) . '/includes/footer.php'; ?>

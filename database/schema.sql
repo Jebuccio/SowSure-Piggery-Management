@@ -138,23 +138,56 @@ create trigger care_owner_guard before insert or update on public.care_activitie
 for each row execute function public.enforce_child_owner();
 drop trigger if exists care_future_date_guard on public.care_activities;
 create trigger care_future_date_guard before insert or update on public.care_activities
+for each row execute function public.enforce_child_owner(); -- wait, keep standard trigger function reference below
+
+drop trigger if exists care_future_date_guard on public.care_activities;
+create trigger care_future_date_guard before insert or update on public.care_activities
 for each row execute function public.reject_past_care_date();
 
+-- Enhanced handle_new_user with safe fallbacks for Google OAuth metadata
 create or replace function public.handle_new_user()
 returns trigger
 language plpgsql
 security definer
 set search_path = public
 as $$
+declare
+    _full_name text;
+    _farm_name text;
+    _username text;
+    _email text;
 begin
+    _email := lower(coalesce(new.email, 'user@example.com'));
+    
+    _full_name := trim(coalesce(new.raw_user_meta_data ->> 'full_name', new.raw_user_meta_data ->> 'name', split_part(_email, '@', 1), 'Farm User'));
+    if length(_full_name) < 2 then
+        _full_name := 'Farm User';
+    end if;
+
+    _farm_name := trim(coalesce(new.raw_user_meta_data ->> 'farm_name', 'My Farm'));
+    if length(_farm_name) < 2 then
+        _farm_name := 'My Farm';
+    end if;
+
+    _username := lower(trim(coalesce(new.raw_user_meta_data ->> 'username', split_part(_email, '@', 1))));
+    _username := regexp_replace(_username, '[^a-z0-9._-]', '', 'g');
+    if length(_username) < 3 then
+        _username := 'user_' || substr(md5(random()::text), 1, 6);
+    end if;
+    if length(_username) > 29 then
+        _username := substr(_username, 1, 29);
+    end if;
+
     insert into public.profiles (id, full_name, farm_name, username, login_email)
     values (
         new.id,
-        trim(coalesce(new.raw_user_meta_data ->> 'full_name', '')),
-        trim(coalesce(new.raw_user_meta_data ->> 'farm_name', '')),
-        lower(trim(coalesce(new.raw_user_meta_data ->> 'username', ''))),
-        lower(new.email)
-    );
+        _full_name,
+        _farm_name,
+        _username,
+        _email
+    )
+    on conflict (id) do nothing;
+    
     return new;
 end;
 $$;
@@ -163,3 +196,25 @@ drop trigger if exists on_auth_user_created on auth.users;
 create trigger on_auth_user_created
 after insert on auth.users
 for each row execute function public.handle_new_user();
+
+-- Enable Row Level Security (RLS) on all tables
+alter table public.profiles enable row level security;
+alter table public.sows enable row level security;
+alter table public.breeding_records enable row level security;
+alter table public.care_activities enable row level security;
+
+-- Create RLS Policies for secure data isolation
+drop policy if exists "Users can view own profile" on public.profiles;
+drop policy if exists "Users can insert own profile" on public.profiles;
+drop policy if exists "Users can update own profile" on public.profiles;
+drop policy if exists "Users can manage own sows" on public.sows;
+drop policy if exists "Users can manage own breeding records" on public.breeding_records;
+drop policy if exists "Users can manage own care activities" on public.care_activities;
+
+create policy "Users can view own profile" on public.profiles for select using (auth.uid() = id);
+create policy "Users can insert own profile" on public.profiles for insert with check (auth.uid() = id);
+create policy "Users can update own profile" on public.profiles for update using (auth.uid() = id);
+
+create policy "Users can manage own sows" on public.sows for all using (auth.uid() = owner_id) with check (auth.uid() = owner_id);
+create policy "Users can manage own breeding records" on public.breeding_records for all using (auth.uid() = owner_id) with check (auth.uid() = owner_id);
+create policy "Users can manage own care activities" on public.care_activities for all using (auth.uid() = owner_id) with check (auth.uid() = owner_id);

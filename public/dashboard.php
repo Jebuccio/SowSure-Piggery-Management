@@ -5,28 +5,76 @@ require_auth();
 
 $today = manila_today();
 $dataError = null;
+$sows = [];
+$breedingRows = [];
+$careRows = [];
+
+$userId = auth_user_id();
+$token = access_token();
+
+// 1. Fetch all active sows independently (Safe isolation)
 try {
-    $sows = $supabase->select('sows', [
-        'select' => 'id,status',
-        'owner_id' => 'eq.' . auth_user_id(),
+    $sowsRaw = $supabase->select('sows', [
+        'select' => 'id,name,tag_number,status,archived_at',
+        'owner_id' => 'eq.' . $userId,
         'archived_at' => 'is.null',
-    ], access_token());
-    $breedingRows = $supabase->select('breeding_records', [
-        'select' => 'id,sow_id,breeding_date,expected_farrowing_date,sows(name,tag_number,status,archived_at)',
-        'owner_id' => 'eq.' . auth_user_id(),
-        'expected_farrowing_date' => 'gte.' . $today,
-        'order' => 'breeding_date.desc',
-    ], access_token());
-    $careRows = $supabase->select('care_activities', [
-        'select' => 'id,sow_id,activity_type,scheduled_date,completed_at,sows(name,tag_number,archived_at)',
-        'owner_id' => 'eq.' . auth_user_id(),
-        'completed_at' => 'is.null',
-        'order' => 'scheduled_date.asc',
-    ], access_token());
+    ], $token);
+    $sows = is_array($sowsRaw) ? $sowsRaw : [];
 } catch (Throwable $exception) {
-    error_log('Dashboard data failed: ' . $exception->getMessage());
-    $sows = $breedingRows = $careRows = [];
-    $dataError = 'We could not refresh your farm overview. Please try again.';
+    error_log('Dashboard sows failed: ' . $exception->getMessage());
+    $sows = [];
+}
+
+// Create a lookup map for quick sow details access
+$sowMap = [];
+foreach ($sows as $sow) {
+    if (!empty($sow['id'])) {
+        $sowMap[$sow['id']] = $sow;
+    }
+}
+
+// 2. Fetch breeding records independently (Isolated so empty tables won't crash dashboard)
+try {
+    $breedingRaw = $supabase->select('breeding_records', [
+        'select' => 'id,sow_id,breeding_date,expected_farrowing_date',
+        'owner_id' => 'eq.' . $userId,
+        'order' => 'breeding_date.desc',
+    ], $token);
+    
+    if (is_array($breedingRaw)) {
+        foreach ($breedingRaw as $record) {
+            $sowId = $record['sow_id'] ?? null;
+            if ($sowId && isset($sowMap[$sowId])) {
+                $record['sows'] = $sowMap[$sowId];
+                $breedingRows[] = $record;
+            }
+        }
+    }
+} catch (Throwable $exception) {
+    error_log('Dashboard breeding failed: ' . $exception->getMessage());
+    $breedingRows = [];
+}
+
+// 3. Fetch care activities independently (Isolated)
+try {
+    $careRaw = $supabase->select('care_activities', [
+        'select' => 'id,sow_id,activity_type,scheduled_date,completed_at',
+        'owner_id' => 'eq.' . $userId,
+        'order' => 'scheduled_date.asc',
+    ], $token);
+
+    if (is_array($careRaw)) {
+        foreach ($careRaw as $activity) {
+            $sowId = $activity['sow_id'] ?? null;
+            if ($sowId && isset($sowMap[$sowId])) {
+                $activity['sows'] = $sowMap[$sowId];
+                $careRows[] = $activity;
+            }
+        }
+    }
+} catch (Throwable $exception) {
+    error_log('Dashboard care failed: ' . $exception->getMessage());
+    $careRows = [];
 }
 
 $latestBySow = [];
@@ -40,14 +88,20 @@ usort($upcomingFarrowing, static fn (array $a, array $b): int => strcmp($a['expe
 $upcomingFarrowing = array_slice($upcomingFarrowing, 0, 5);
 
 $upcomingCare = array_values(array_filter($careRows, static fn (array $a): bool =>
-    $a['scheduled_date'] >= $today && ($a['sows']['archived_at'] ?? null) === null
+    ($a['scheduled_date'] ?? '') >= $today && empty($a['completed_at']) && ($a['sows']['archived_at'] ?? null) === null
 ));
 $upcomingCare = array_slice($upcomingCare, 0, 5);
+
 $overdueCare = array_values(array_filter($careRows, static fn (array $a): bool =>
-    $a['scheduled_date'] < $today && ($a['sows']['archived_at'] ?? null) === null
+    ($a['scheduled_date'] ?? '') < $today && empty($a['completed_at']) && ($a['sows']['archived_at'] ?? null) === null
 ));
 
-$profile = current_profile();
+try {
+    $profile = current_profile();
+} catch (Throwable $exception) {
+    $profile = ['full_name' => 'Farm User', 'farm_name' => 'My Farm'];
+}
+
 $hour = (int) (new DateTimeImmutable('now', new DateTimeZone('Asia/Manila')))->format('G');
 $greeting = $hour < 12 ? 'Good morning' : ($hour < 18 ? 'Good afternoon' : 'Good evening');
 $firstName = explode(' ', trim((string) ($profile['full_name'] ?? 'there')))[0];

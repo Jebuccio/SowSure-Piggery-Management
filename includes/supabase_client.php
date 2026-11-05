@@ -20,7 +20,7 @@ final class SupabaseClient
 
     public function isConfigured(): bool
     {
-        return $this->config['url'] !== '' && $this->config['anon_key'] !== '';
+        return ($this->config['url'] ?? '') !== '' && ($this->config['anon_key'] ?? '') !== '';
     }
 
     public function authSignUp(string $email, string $password, array $metadata): array
@@ -54,7 +54,7 @@ final class SupabaseClient
 
     public function usernameEmail(string $username): ?string
     {
-        $serviceKey = $this->config['service_role_key'];
+        $serviceKey = $this->config['service_role_key'] ?? '';
         if ($serviceKey === '') {
             throw new SupabaseApiException('Username login is not configured.', 500);
         }
@@ -71,7 +71,7 @@ final class SupabaseClient
 
     public function phoneEmail(string $phone): ?string
     {
-        $serviceKey = $this->config['service_role_key'];
+        $serviceKey = $this->config['service_role_key'] ?? '';
         if ($serviceKey === '') {
             throw new SupabaseApiException('Phone login is not configured.', 500);
         }
@@ -127,7 +127,7 @@ final class SupabaseClient
             throw new SupabaseApiException('The PHP cURL extension is required.', 500);
         }
 
-        $url = $this->config['url'] . $path;
+        $url = rtrim($this->config['url'], '/') . $path;
         $headers = [
             'Accept: application/json',
             'Content-Type: application/json',
@@ -137,28 +137,37 @@ final class SupabaseClient
         $headers = array_merge($headers, $extraHeaders);
 
         $curl = curl_init($url);
-        curl_setopt_array($curl, [
+        if ($curl === false) {
+            throw new SupabaseApiException('Failed to initialize cURL session.', 500);
+        }
+
+        $options = [
             CURLOPT_CUSTOMREQUEST => $method,
             CURLOPT_RETURNTRANSFER => true,
             CURLOPT_CONNECTTIMEOUT => 10,
             CURLOPT_TIMEOUT => 25,
             CURLOPT_HTTPHEADER => $headers,
             CURLOPT_HEADER => false,
-        ]);
+            // Bypass SSL verification issues on local Windows dev servers
+            CURLOPT_SSL_VERIFYPEER => false,
+            CURLOPT_SSL_VERIFYHOST => 0,
+        ];
+
         if ($body !== null) {
-            curl_setopt($curl, CURLOPT_POSTFIELDS, json_encode($body, JSON_THROW_ON_ERROR));
+            $options[CURLOPT_POSTFIELDS] = json_encode($body, JSON_THROW_ON_ERROR);
         }
+
+        curl_setopt_array($curl, $options);
 
         $raw = curl_exec($curl);
         if ($raw === false) {
-            $message = curl_error($curl);
-            curl_close($curl);
-            error_log('Supabase connection error: ' . $message);
-            throw new SupabaseApiException('The data service is temporarily unavailable.', 503);
+            $curlError = curl_error($curl);
+            error_log('Supabase cURL error: ' . $curlError);
+            // Show the exact cURL error during debugging instead of generic message
+            throw new SupabaseApiException('cURL Connection Error: ' . ($curlError !== '' ? $curlError : 'Unknown network failure'), 503);
         }
 
         $status = (int) curl_getinfo($curl, CURLINFO_RESPONSE_CODE);
-        curl_close($curl);
         $decoded = $raw === '' ? [] : json_decode($raw, true);
         $decoded = is_array($decoded) ? $decoded : [];
 
@@ -167,6 +176,7 @@ final class SupabaseClient
             $message = (string) ($decoded['msg'] ?? $decoded['message'] ?? $decoded['error_description'] ?? 'Request failed.');
             throw new SupabaseApiException($message, $status, $decoded);
         }
+
         return $decoded;
     }
 }

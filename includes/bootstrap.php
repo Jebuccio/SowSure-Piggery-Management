@@ -1,12 +1,15 @@
 <?php
 declare(strict_types=1);
 
+// 1. Load application config and environment first
 $app = require dirname(__DIR__) . '/config/app.php';
-$supabaseConfig = require dirname(__DIR__) . '/config/supabase.php';
 
 require_once __DIR__ . '/session.php';
 start_secure_session($app);
 $translations = require dirname(__DIR__) . '/lang/en.php';
+
+// 2. Load Supabase config *after* environment is initialized
+$supabaseConfig = require dirname(__DIR__) . '/config/supabase.php';
 
 function e(mixed $value): string
 {

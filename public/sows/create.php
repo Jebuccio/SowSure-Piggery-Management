@@ -28,8 +28,25 @@ if (method_is('POST')) {
                 'status' => $values['status'],
                 'notes' => $values['notes'] !== '' ? $values['notes'] : null,
             ], access_token());
+
+            // Fallback lookup if insert didn't return the row representation directly
+            $sowId = $rows[0]['id'] ?? null;
+            if (!$sowId) {
+                $fetched = $supabase->select('sows', [
+                    'select' => 'id',
+                    'owner_id' => 'eq.' . auth_user_id(),
+                    'tag_number' => 'eq.' . $values['tag_number'],
+                    'limit' => '1',
+                ], access_token());
+                $sowId = $fetched[0]['id'] ?? null;
+            }
+
+            if (!$sowId) {
+                throw new RuntimeException('Sow was created, but could not retrieve its ID.');
+            }
+
             flash('success', $values['name'] . ' was added to your herd.');
-            redirect('/sows/view.php?id=' . rawurlencode((string) $rows[0]['id']));
+            redirect('/sows/view.php?id=' . rawurlencode((string) $sowId));
         } catch (Throwable $exception) {
             error_log('Create sow failed: ' . $exception->getMessage());
             $errors['form'] = friendly_data_error($exception, 'We could not save this sow. Please try again.');

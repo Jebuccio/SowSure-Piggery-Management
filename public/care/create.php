@@ -3,68 +3,111 @@ declare(strict_types=1);
 require dirname(__DIR__, 2) . '/includes/bootstrap.php';
 require_auth();
 
-try {
-    $sows = owned_active_sows();
-} catch (Throwable $exception) {
-    error_log('Load sows for care failed: ' . $exception->getMessage());
-    $sows = [];
-}
-$types = ['vaccination' => 'Vaccination', 'vitamins' => 'Vitamins', 'deworming' => 'Deworming', 'health_check' => 'Health check', 'other' => 'Other care'];
 $errors = [];
-$values = ['sow_id' => (string) ($_GET['sow_id'] ?? ''), 'activity_type' => 'health_check', 'scheduled_date' => manila_today(), 'notes' => ''];
+$values = [
+    'name' => '',
+    'tag_number' => '',
+    'status' => 'healthy',
+    'notes' => ''
+];
+
+$statuses = [
+    'healthy' => 'Healthy',
+    'breeding' => 'Breeding',
+    'gestating' => 'Gestating',
+    'isolated' => 'Isolated'
+];
 
 if (method_is('POST')) {
     verify_csrf();
-    $values['sow_id'] = clean_text($_POST['sow_id'] ?? '', 36);
-    $values['activity_type'] = clean_text($_POST['activity_type'] ?? '', 30);
-    $values['scheduled_date'] = clean_text($_POST['scheduled_date'] ?? '', 10);
+    
+    $values['name'] = clean_text($_POST['name'] ?? '', 100);
+    $values['tag_number'] = clean_text($_POST['tag_number'] ?? '', 50);
+    $values['status'] = clean_text($_POST['status'] ?? 'healthy', 30);
     $values['notes'] = clean_text($_POST['notes'] ?? '', 2000);
-    if (!in_array($values['sow_id'], array_column($sows, 'id'), true)) {
-        $errors['sow_id'] = 'Choose one of your active sows.';
+
+    // Validation checks
+    if (mb_strlen(trim($values['name'])) < 1) {
+        $errors['name'] = 'Sow name is required.';
     }
-    if (!isset($types[$values['activity_type']])) {
-        $errors['activity_type'] = 'Choose a valid care type.';
+    if (mb_strlen(trim($values['tag_number'])) < 1) {
+        $errors['tag_number'] = 'Tag number is required.';
     }
-    if (!valid_iso_date($values['scheduled_date']) || $values['scheduled_date'] < manila_today()) {
-        $errors['scheduled_date'] = 'Scheduled date must be today or later in Asia/Manila time.';
+    if (!isset($statuses[$values['status']])) {
+        $errors['status'] = 'Choose a valid status.';
     }
+
     if (!$errors) {
         try {
-            $supabase->insert('care_activities', [
+            $supabase->insert('sows', [
                 'owner_id' => auth_user_id(),
-                'sow_id' => $values['sow_id'],
-                'activity_type' => $values['activity_type'],
-                'scheduled_date' => $values['scheduled_date'],
+                'name' => $values['name'],
+                'tag_number' => $values['tag_number'],
+                'status' => $values['status'],
                 'notes' => $values['notes'] !== '' ? $values['notes'] : null,
             ], access_token());
-            flash('success', $types[$values['activity_type']] . ' was scheduled for ' . format_date($values['scheduled_date']) . '.');
-            redirect('/care/index.php');
+
+            flash('success', 'Sow ' . $values['name'] . ' (Tag: ' . $values['tag_number'] . ') was added successfully.');
+            redirect('/dashboard.php');
         } catch (Throwable $exception) {
-            error_log('Create care failed: ' . $exception->getMessage());
-            $errors['form'] = friendly_data_error($exception, 'We could not schedule this care activity.');
+            error_log('Create sow failed: ' . $exception->getMessage());
+            
+            // TEMPORARY DEBUGGER: If it fails, show the exact reason on screen
+            // (You can change this back to friendly_data_error once verified)
+            $errors['form'] = 'Database Error: ' . $exception->getMessage();
         }
     }
 }
 
-$pageTitle = 'Schedule care';
+$pageTitle = 'Add sow';
 require dirname(__DIR__, 2) . '/includes/header.php';
 ?>
-<div class="page-heading compact"><div><a class="back-link" href="<?= e(url('/care/index.php')) ?>">Back to care</a><h1>Schedule care</h1><p>Plan one clear activity for a sow.</p></div></div>
-<?php if (!$sows): ?>
-    <section class="empty-state card"><h2>Add an active sow first</h2><p>Care must be linked to one of your active sows.</p><a class="button" href="<?= e(url('/sows/create.php')) ?>">Add sow</a></section>
-<?php else: ?>
+<div class="page-heading compact">
+    <div>
+        <a class="back-link" href="<?= e(url('/dashboard.php')) ?>">Back to dashboard</a>
+        <h1>Add new sow</h1>
+        <p>Register an active sow into your herd records.</p>
+    </div>
+</div>
+
 <section class="form-card card">
-    <?php if (isset($errors['form'])): ?><div class="form-alert"><?= e($errors['form']) ?></div><?php endif; ?>
+    <?php if (isset($errors['form'])): ?>
+        <div class="form-alert"><?= e($errors['form']) ?></div>
+    <?php endif; ?>
+    
     <form method="post" class="stack-form" novalidate>
         <?= csrf_field() ?>
-        <label>Sow <select name="sow_id" required><option value="">Choose a sow</option><?php foreach ($sows as $sow): ?><option value="<?= e($sow['id']) ?>" <?= $values['sow_id'] === $sow['id'] ? 'selected' : '' ?>><?= e($sow['name']) ?> · <?= e($sow['tag_number']) ?></option><?php endforeach; ?></select><?php if (isset($errors['sow_id'])): ?><small class="field-error"><?= e($errors['sow_id']) ?></small><?php endif; ?></label>
+        
+        <label>Sow Name / Identifier 
+            <input type="text" name="name" value="<?= e($values['name']) ?>" placeholder="e.g., Daisy or UNion" required maxlength="100">
+            <?php if (isset($errors['name'])): ?><small class="field-error"><?= e($errors['name']) ?></small><?php endif; ?>
+        </label>
+
         <div class="form-grid">
-            <label>Activity type <select name="activity_type"><?php foreach ($types as $key => $label): ?><option value="<?= e($key) ?>" <?= $values['activity_type'] === $key ? 'selected' : '' ?>><?= e($label) ?></option><?php endforeach; ?></select><?php if (isset($errors['activity_type'])): ?><small class="field-error"><?= e($errors['activity_type']) ?></small><?php endif; ?></label>
-            <label>Scheduled date <input type="date" name="scheduled_date" value="<?= e($values['scheduled_date']) ?>" min="<?= e(manila_today()) ?>" required><?php if (isset($errors['scheduled_date'])): ?><small class="field-error"><?= e($errors['scheduled_date']) ?></small><?php endif; ?></label>
+            <label>Tag Number 
+                <input type="text" name="tag_number" value="<?= e($values['tag_number']) ?>" placeholder="e.g., 1 or TAG-12" required maxlength="50">
+                <?php if (isset($errors['tag_number'])): ?><small class="field-error"><?= e($errors['tag_number']) ?></small><?php endif; ?>
+            </label>
+
+            <label>Status 
+                <select name="status">
+                    <?php foreach ($statuses as $key => $label): ?>
+                        <option value="<?= e($key) ?>" <?= $values['status'] === $key ? 'selected' : '' ?>><?= e($label) ?></option>
+                    <?php endforeach; ?>
+                </select>
+                <?php if (isset($errors['status'])): ?><small class="field-error"><?= e($errors['status']) ?></small><?php endif; ?>
+            </label>
         </div>
-        <label>Notes <textarea name="notes" rows="4" maxlength="2000" placeholder="Dose, preparation, or observations"><?= e($values['notes']) ?></textarea></label>
-        <div class="form-actions"><button class="button" type="submit">Schedule activity</button><a class="button button-ghost" href="<?= e(url('/care/index.php')) ?>">Cancel</a></div>
+
+        <label>Notes 
+            <textarea name="notes" rows="4" maxlength="2000" placeholder="Breed details, medical history, or observations"><?= e($values['notes']) ?></textarea>
+        </label>
+
+        <div class="form-actions">
+            <button class="button" type="submit">Save sow</button>
+            <a class="button button-ghost" href="<?= e(url('/dashboard.php')) ?>">Cancel</a>
+        </div>
     </form>
 </section>
-<?php endif; ?>
+
 <?php require dirname(__DIR__, 2) . '/includes/footer.php'; ?>
