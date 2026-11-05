@@ -109,7 +109,8 @@ require dirname(__DIR__) . '/includes/header.php';
 <script>
 function redirectToProvider(provider) {
     const supabaseUrl = 'https://eefuplooeyhwomvwydew.supabase.co';
-    const redirectTo = window.location.origin + '/login.php';
+    // Dynamically captures http://localhost:8000/login.php OR https://sowsure-piggery-management.onrender.com/login.php
+    const redirectTo = window.location.origin + window.location.pathname;
     window.location.href = `${supabaseUrl}/auth/v1/authorize?provider=${provider}&redirect_to=${encodeURIComponent(redirectTo)}&flow_type=token`;
 }
 
@@ -135,7 +136,7 @@ window.addEventListener('DOMContentLoaded', () => {
         if (accessToken) {
             fetch('/auth_callback.php', {
                 method: 'POST',
-                credentials: 'include', // <--- THIS PREVENTS THE SESSION FROM DROPPING
+                credentials: 'include',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ 
                     access_token: accessToken, 
