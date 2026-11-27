@@ -150,6 +150,80 @@ final class SupabaseClient
         );
     }
 
+    public function delete(string $table, array $filters, string $jwt): array
+    {
+        return $this->request(
+            'DELETE',
+            '/rest/v1/' . rawurlencode($table) . '?' . http_build_query($filters),
+            null,
+            $jwt,
+            ['Prefer: return=representation']
+        );
+    }
+
+    public function uploadStorageFile(
+        string $bucket,
+        string $objectPath,
+        string $localFilePath,
+        string $mimeType,
+        string $jwt
+    ): string {
+        if (!$this->isConfigured()) {
+            throw new SupabaseApiException('Supabase is not configured.', 503);
+        }
+        if (!is_file($localFilePath) || !is_readable($localFilePath)) {
+            throw new SupabaseApiException('Uploaded temporary file is unreadable.', 400);
+        }
+
+        $binary = file_get_contents($localFilePath);
+        if ($binary === false) {
+            throw new SupabaseApiException('Failed to read uploaded file bytes.', 500);
+        }
+
+        $encodedPath = implode('/', array_map('rawurlencode', explode('/', ltrim($objectPath, '/'))));
+        $baseUrl = rtrim($this->config['url'], '/');
+        $uploadUrl = $baseUrl . '/storage/v1/object/' . rawurlencode($bucket) . '/' . $encodedPath;
+
+        $curl = curl_init($uploadUrl);
+        if ($curl === false) {
+            throw new SupabaseApiException('Failed to initialize storage upload session.', 500);
+        }
+
+        curl_setopt_array($curl, [
+            CURLOPT_CUSTOMREQUEST => 'POST',
+            CURLOPT_RETURNTRANSFER => true,
+            CURLOPT_CONNECTTIMEOUT => 10,
+            CURLOPT_TIMEOUT => 30,
+            CURLOPT_HTTPHEADER => [
+                'apikey: ' . $this->config['anon_key'],
+                'Authorization: Bearer ' . $jwt,
+                'Content-Type: ' . $mimeType,
+                'x-upsert: true',
+            ],
+            CURLOPT_POSTFIELDS => $binary,
+            CURLOPT_SSL_VERIFYPEER => false,
+            CURLOPT_SSL_VERIFYHOST => 0,
+        ]);
+
+        $raw = curl_exec($curl);
+        if ($raw === false) {
+            $curlError = curl_error($curl);
+            throw new SupabaseApiException('Storage cURL error: ' . ($curlError !== '' ? $curlError : 'Unknown failure'), 503);
+        }
+
+        $status = (int) curl_getinfo($curl, CURLINFO_RESPONSE_CODE);
+        $decoded = $raw === '' ? [] : json_decode($raw, true);
+        $decoded = is_array($decoded) ? $decoded : [];
+
+        if ($status < 200 || $status >= 300) {
+            error_log('Supabase storage upload error (' . $status . '): ' . substr($raw, 0, 500));
+            $message = (string) ($decoded['message'] ?? $decoded['error'] ?? 'Storage upload failed.');
+            throw new SupabaseApiException($message, $status, $decoded);
+        }
+
+        return $baseUrl . '/storage/v1/object/public/' . rawurlencode($bucket) . '/' . $encodedPath;
+    }
+
     private function request(
         string $method,
         string $path,

@@ -19,30 +19,81 @@ if (method_is('POST')) {
         $errors['status'] = 'Choose a valid status.';
     }
 
+    $hasPhoto = isset($_FILES['sow_photo']) && ($_FILES['sow_photo']['error'] ?? UPLOAD_ERR_NO_FILE) !== UPLOAD_ERR_NO_FILE;
+    $photoMime = '';
+    $photoExt = '';
+    if ($hasPhoto) {
+        $file = $_FILES['sow_photo'];
+        if (($file['error'] ?? UPLOAD_ERR_NO_FILE) !== UPLOAD_ERR_OK) {
+            $errors['sow_photo'] = 'Photo upload failed. Please try again.';
+        } elseif (($file['size'] ?? 0) > 5 * 1024 * 1024) {
+            $errors['sow_photo'] = 'Image must be 5 MB or smaller.';
+        } else {
+            $finfo = new finfo(FILEINFO_MIME_TYPE);
+            $photoMime = (string) $finfo->file($file['tmp_name']);
+            $allowedMimes = [
+                'image/jpeg' => 'jpg',
+                'image/png' => 'png',
+                'image/webp' => 'webp',
+            ];
+            if (!isset($allowedMimes[$photoMime])) {
+                $errors['sow_photo'] = 'Only JPG, PNG, or WEBP images are supported.';
+            } else {
+                $photoExt = $allowedMimes[$photoMime];
+            }
+        }
+    }
+
     if (!$errors) {
         try {
+            $userId = auth_user_id();
+            $token = access_token();
+
             $rows = $supabase->insert('sows', [
-                'owner_id' => auth_user_id(),
+                'owner_id' => $userId,
                 'name' => $values['name'],
                 'tag_number' => $values['tag_number'],
                 'status' => $values['status'],
                 'notes' => $values['notes'] !== '' ? $values['notes'] : null,
-            ], access_token());
+            ], $token);
 
-            // Fallback lookup if insert didn't return the row representation directly
             $sowId = $rows[0]['id'] ?? null;
             if (!$sowId) {
                 $fetched = $supabase->select('sows', [
                     'select' => 'id',
-                    'owner_id' => 'eq.' . auth_user_id(),
+                    'owner_id' => 'eq.' . $userId,
                     'tag_number' => 'eq.' . $values['tag_number'],
                     'limit' => '1',
-                ], access_token());
+                ], $token);
                 $sowId = $fetched[0]['id'] ?? null;
             }
 
             if (!$sowId) {
                 throw new RuntimeException('Sow was created, but could not retrieve its ID.');
+            }
+
+            if ($hasPhoto) {
+                try {
+                    $objectPath = $userId . '/' . $sowId . '_' . time() . '.' . $photoExt;
+                    $publicUrl = $supabase->uploadStorageFile(
+                        'sow-photos',
+                        $objectPath,
+                        $_FILES['sow_photo']['tmp_name'],
+                        $photoMime,
+                        $token
+                    );
+
+                    $supabase->update('sows', [
+                        'id' => 'eq.' . $sowId,
+                        'owner_id' => 'eq.' . $userId,
+                    ], [
+                        'photo_url' => $publicUrl,
+                    ], $token);
+                } catch (Throwable $photoEx) {
+                    error_log('Create sow photo upload failed: ' . $photoEx->getMessage());
+                    flash('error', 'Sow was created, but photo upload failed: ' . $photoEx->getMessage());
+                    redirect('/sows/view.php?id=' . rawurlencode((string) $sowId));
+                }
             }
 
             flash('success', $values['name'] . ' was added to your herd.');
@@ -60,7 +111,7 @@ require dirname(__DIR__, 2) . '/includes/header.php';
 <div class="page-heading compact"><div><a class="back-link" href="<?= e(url('/sows/index.php')) ?>">Back to sows</a><h1>Add a sow</h1><p>Add a clear, searchable record to your herd.</p></div></div>
 <section class="form-card card">
     <?php if (isset($errors['form'])): ?><div class="form-alert" role="alert"><?= e($errors['form']) ?></div><?php endif; ?>
-    <form method="post" class="stack-form" novalidate>
+    <form method="post" enctype="multipart/form-data" class="stack-form" novalidate>
         <?= csrf_field() ?>
         <div class="form-grid">
             <label>Sow name <span aria-hidden="true">*</span>
@@ -73,12 +124,19 @@ require dirname(__DIR__, 2) . '/includes/header.php';
                 <?php if (isset($errors['tag_number'])): ?><small class="field-error"><?= e($errors['tag_number']) ?></small><?php endif; ?>
             </label>
         </div>
-        <label>Status
-            <select name="status" required>
-                <?php foreach ($allowedStatuses as $option): ?><option value="<?= e($option) ?>" <?= $values['status'] === $option ? 'selected' : '' ?>><?= e(ucfirst($option)) ?></option><?php endforeach; ?>
-            </select>
-            <?php if (isset($errors['status'])): ?><small class="field-error"><?= e($errors['status']) ?></small><?php endif; ?>
-        </label>
+        <div class="form-grid">
+            <label>Status
+                <select name="status" required>
+                    <?php foreach ($allowedStatuses as $option): ?><option value="<?= e($option) ?>" <?= $values['status'] === $option ? 'selected' : '' ?>><?= e(ucfirst($option)) ?></option><?php endforeach; ?>
+                </select>
+                <?php if (isset($errors['status'])): ?><small class="field-error"><?= e($errors['status']) ?></small><?php endif; ?>
+            </label>
+            <label>Sow photo (optional)
+                <input type="file" name="sow_photo" accept="image/jpeg,image/png,image/webp">
+                <small>JPG, PNG, or WEBP up to 5 MB.</small>
+                <?php if (isset($errors['sow_photo'])): ?><small class="field-error"><?= e($errors['sow_photo']) ?></small><?php endif; ?>
+            </label>
+        </div>
         <label>Care notes
             <textarea name="notes" rows="5" maxlength="2000" placeholder="Health, feeding, or handling notes"><?= e($values['notes']) ?></textarea>
         </label>

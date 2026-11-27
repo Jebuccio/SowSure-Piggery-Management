@@ -8,7 +8,7 @@ function find_owned_sow(string $id, bool $includeArchived = false): ?array
         return null;
     }
     $query = [
-        'select' => 'id,name,tag_number,status,notes,created_at,updated_at,archived_at',
+        'select' => 'id,name,tag_number,status,photo_url,notes,created_at,updated_at,archived_at',
         'id' => 'eq.' . $id,
         'owner_id' => 'eq.' . auth_user_id(),
         'limit' => '1',
@@ -24,7 +24,7 @@ function owned_active_sows(): array
 {
     global $supabase;
     return $supabase->select('sows', [
-        'select' => 'id,name,tag_number,status',
+        'select' => 'id,name,tag_number,status,photo_url',
         'owner_id' => 'eq.' . auth_user_id(),
         'archived_at' => 'is.null',
         'order' => 'name.asc',
