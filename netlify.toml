@@ -1,0 +1,7 @@
+
+  publish = "public"
+
+
+  from = "/*"
+  to = "/index.php"
+  status = 200
